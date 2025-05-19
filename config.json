@@ -1,7 +1,7 @@
 {
   "DESIGN_NAME": "dual_port_ram",
   "FP_SIZING": "absolute",
-  "DIE_AREA": [0, 0, 1500, 1500],
+  "DIE_AREA": [0, 0, 3000, 2000],
   "VDD_NETS": ["VPWR"],
   "GND_NETS": ["VGND"],
   
@@ -17,7 +17,7 @@
           "orientation": "N"
         },
         "mem1": {
-          "location": [800, 200],
+          "location": [1600, 200],
           "orientation": "N"
         }
       },
@@ -28,9 +28,11 @@
         "min": ["macros/dffram256x32/timing/spef/DFFRAM256x32.min.spef"],
         "nom": ["macros/dffram256x32/timing/spef/DFFRAM256x32.nom.spef"]
       },
-      "lib": {
-        "tt": "macros/dffram256x32/timing/lib/max/DFFRAM256x32.Slowest.lib"
-      },
+	  "lib": {
+		"tt": "macros/dffram256x32/timing/lib/max/DFFRAM256x32.Typical.lib",
+		"ss": "macros/dffram256x32/timing/lib/max/DFFRAM256x32.Slowest.lib",
+		"ff": "macros/dffram256x32/timing/lib/max/DFFRAM256x32.Fastest.lib"
+	},
       "nl": ["macros/dffram256x32/hdl/gl/DFFRAM256x32.v"],
       "pnl": ["macros/dffram256x32/hdl/gl/DFFRAM256x32.v"]
     }
