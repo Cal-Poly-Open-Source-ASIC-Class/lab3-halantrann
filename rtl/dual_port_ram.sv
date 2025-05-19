@@ -50,12 +50,16 @@ module dual_port_ram(
     logic [3:0]  mem0_we, mem1_we;
     logic        mem0_en, mem1_en;
 
-    // Request tracking for proper acknowledgment
-    logic pA_req_r, pB_req_r;
-    logic pA_active_r, pB_active_r;
-    logic [31:0] pA_data_r, pB_data_r;
-    
-    // Memory access control
+    // Tracking for proper acknowledgment
+    logic pA_active;
+    logic pB_active;
+    logic pB_pending_active;
+
+    // Stall signals in combinational logic for immediate response
+    assign pA_wb_stall_o = 1'b0; // Port A never stalls (has priority)
+    assign pB_wb_stall_o = conflict; // Port B stalls on conflict
+
+    // Memory access control logic
     always_comb begin
         // Default values
         mem0_en = 1'b0;
@@ -66,10 +70,14 @@ module dual_port_ram(
         mem1_addr = 8'd0;
         mem0_data_in = 32'd0;
         mem1_data_in = 32'd0;
+        pA_active = 1'b0;
+        pB_active = 1'b0;
+        pB_pending_active = 1'b0;
 
         // Port A access
         if (pA_granted) begin
-            if (!pA_mem_sel) begin
+            pA_active = 1'b1;
+            if (pA_mem_sel == 1'b0) begin
                 // Access to memory bank 0
                 mem0_en = 1'b1;
                 mem0_addr = pA_wb_addr_i[9:2];
@@ -86,7 +94,8 @@ module dual_port_ram(
 
         // Port B access (only if no conflict)
         if (pB_granted) begin
-            if (!pB_mem_sel) begin
+            pB_active = 1'b1;
+            if (pB_mem_sel == 1'b0) begin
                 // Access to memory bank 0
                 mem0_en = 1'b1;
                 mem0_addr = pB_wb_addr_i[9:2];
@@ -101,9 +110,10 @@ module dual_port_ram(
             end
         end
         
-        // Handle pending Port B transaction (when Port A is not active)
-        else if (pB_pending && !pA_wb_stb_i) begin
-            if (!pB_pending_mem_sel) begin
+        // Handle pending Port B transaction
+        else if (pB_pending) begin
+            pB_pending_active = 1'b1;
+            if (pB_pending_mem_sel == 1'b0) begin
                 // Access to memory bank 0
                 mem0_en = 1'b1;
                 mem0_addr = pB_pending_addr[9:2];
@@ -119,93 +129,53 @@ module dual_port_ram(
         end
     end
 
-    // Sequential logic for port control and acknowledgment
+    // Sequential logic for acknowledgment and pending transaction handling
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
-            pA_wb_stall_o <= 1'b0;
-            pB_wb_stall_o <= 1'b0;
             pA_wb_ack_o <= 1'b0;
             pB_wb_ack_o <= 1'b0;
-            pA_req_r <= 1'b0;
-            pB_req_r <= 1'b0;
-            pA_active_r <= 1'b0;
-            pB_active_r <= 1'b0;
-            pA_data_r <= 32'd0;
-            pB_data_r <= 32'd0;
             pB_pending <= 1'b0;
             pB_pending_addr <= 32'd0;
             pB_pending_data <= 32'd0;
             pB_pending_we <= 1'b0;
             pB_pending_mem_sel <= 1'b0;
         end else begin
-            // Track new requests
-            pA_req_r <= pA_wb_stb_i && pA_wb_cyc_i;
-            pB_req_r <= pB_wb_stb_i && pB_wb_cyc_i;
+            // Port A acknowledgment - asserted in the cycle after a request is granted
+            pA_wb_ack_o <= pA_active;
             
-            // Set active signals for granted requests
-            pA_active_r <= pA_granted;
-            
-            // Port B can be active either due to direct grant or handling a pending transaction
-            pB_active_r <= pB_granted || (pB_pending && !pA_wb_stb_i);
-            
-            // Generate acknowledgments one cycle after request is granted
-            pA_wb_ack_o <= pA_active_r;
-            
-            // Port B gets acknowledged when actively granted or when a pending transaction completes
-            if (pB_active_r && !pB_pending) begin
-                // Normal operation - direct grant
+            // Port B acknowledgment logic
+            if (pB_active) begin
+                // Direct transaction acknowledgment
                 pB_wb_ack_o <= 1'b1;
-            end else if (pB_active_r && pB_pending) begin
-                // Completing a pending transaction
+                // No need to set pending in this case
+            end else if (pB_pending_active) begin
+                // Pending transaction acknowledgment
                 pB_wb_ack_o <= 1'b1;
-                pB_pending <= 1'b0; // Clear pending flag
+                pB_pending <= 1'b0; // Clear pending flag once transaction is processed
             end else begin
                 pB_wb_ack_o <= 1'b0;
             end
             
-            // Save the Port B transaction when there's a conflict
-            if (conflict && pB_wb_stb_i && pB_wb_cyc_i && !pB_pending) begin
+            // Record Port B transaction when there's a conflict
+            if (conflict && pB_wb_stb_i && pB_wb_cyc_i) begin
                 pB_pending <= 1'b1;
                 pB_pending_addr <= pB_wb_addr_i;
                 pB_pending_data <= pB_wb_data_i;
                 pB_pending_we <= pB_wb_we_i;
                 pB_pending_mem_sel <= pB_mem_sel;
             end
-            
-            // Set stall signals
-            pA_wb_stall_o <= 1'b0; // Port A given priority 
-            
-            // Port B stalls on conflict or when it has a pending transaction
-            pB_wb_stall_o <= conflict || pB_pending;
-            
-            // Capture read data for proper output timing
-            if (pA_active_r) begin
-                if (!pA_mem_sel)
-                    pA_data_r <= mem0_data_out;
-                else
-                    pA_data_r <= mem1_data_out;
-            end
-            
-            if (pB_active_r) begin
-                if (pB_pending) begin
-                    // Reading from the appropriate bank for a pending transaction
-                    if (!pB_pending_mem_sel)
-                        pB_data_r <= mem0_data_out;
-                    else
-                        pB_data_r <= mem1_data_out;
-                end else 
-                    // Normal operation
-                    if (!pB_mem_sel)
-                        pB_data_r <= mem0_data_out;
-                    else
-                        pB_data_r <= mem1_data_out;
-            end
         end
     end
+
+    // Direct data output connections for immediate response
+    // Memory data is available in the same cycle as the address is applied
+    assign pA_wb_data_o = pA_mem_sel ? mem1_data_out : mem0_data_out;
     
-    // Data output assignment
-    assign pA_wb_data_o = pA_data_r;
-    assign pB_wb_data_o = pB_data_r;
+    // Port B data output comes from the appropriate memory based on whether we're handling
+    // a pending transaction or a direct access
+    assign pB_wb_data_o = pB_pending_active ? 
+                           (pB_pending_mem_sel ? mem1_data_out : mem0_data_out) : 
+                           (pB_mem_sel ? mem1_data_out : mem0_data_out);
 
     // RAM Instantiations
     DFFRAM256x32 mem0 (

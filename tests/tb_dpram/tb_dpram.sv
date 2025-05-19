@@ -65,7 +65,7 @@ module tb_dpram;
                     
                 timeout_counter = timeout_counter + 1;
                 if (timeout_counter >= TIMEOUT_LIMIT) begin
-                    $display("ERROR: Timeout waiting for %s acknowledgment", is_port_a ? "Port A" : "Port B");
+                    $display("❌ ERROR: Timeout waiting for %s acknowledgment", is_port_a ? "Port A" : "Port B");
                     break;
                 end
             end
