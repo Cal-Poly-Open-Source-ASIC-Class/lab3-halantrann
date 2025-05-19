@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 
 // iverilog -g2012 -Irtl -s tb_dpram rtl/dual_port_ram.sv rtl/DFFRAM256x32.v tests/tb_dpram/tb_dpram.sv
+// /macros/dffram256x32/timing/lib/max/DFFRAM256x32.Slowest.lib
 
 module tb_dpram;
 
